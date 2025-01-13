@@ -31,10 +31,27 @@ class Settings(BaseSettings):
     #password recovery
     RESET_TOKEN_EXPIRES: int
 
+    #Reset password URL
+    RESET_PASSWORD_URL: str
+
+    # General credentials
+    GENERAL_PASSWORD: str
+
     #Admin credentials
     ADMIN_EMAIL: str
-    ADMIN_PASSWORD: str
     ADMIN_FULLNAME: str
+    
+    # Student credentials
+    STUDENT_EMAIL: str
+    STUDENT_FULLNAME: str
+    
+    # Teacher credentials
+    TEACHER_EMAIL: str
+    TEACHER_FULLNAME: str
+    
+    # Parent credentials
+    PARENT_EMAIL: str
+    PARENT_FULLNAME: str
 
 
 
@@ -42,3 +59,4 @@ class Settings(BaseSettings):
         env_file = ".env"
 
 settings = Settings()
+

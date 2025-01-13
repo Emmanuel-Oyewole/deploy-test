@@ -11,6 +11,7 @@ from fastapi import (
     Response,
     Request,
     BackgroundTasks,
+    Query,
 )
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -22,7 +23,6 @@ from ..helper.utility import (
     find_unapproved_user,
     find_user_in_db,
     verify_password,
-    hash_refresh_token,
     generate_reset_token,
     verify_reset_token,
     hash_password,
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post(
     "/enroll", status_code=status.HTTP_201_CREATED, response_model=users.EnrollResponse
 )
-async def enroll_user(payload: users.Enroll):
+def enroll_user(payload: users.Enroll):
     approved_user_exist = find_approved_user(payload.email)
     if approved_user_exist:
         raise HTTPException(
@@ -61,8 +61,8 @@ async def enroll_user(payload: users.Enroll):
     return {"user_id": str(new_user.user_id), "message": "success"}
 
 
-@router.post("/login", response_model=oauth.Token)
-async def login_user(
+@router.post("/login", status_code=status.HTTP_200_OK, response_model=oauth.Token)
+def login_user(
     payload: Annotated[OAuth2PasswordRequestForm, Depends()],
     response: Response,
     request: Request,
@@ -108,19 +108,23 @@ async def login_user(
             data={"sub": str(approved_user.user_id), "role": approved_user.user_type}
         )
 
-        hashed_refresh_token = hash_refresh_token(refresh_token)
-        approved_user.refresh_token = hashed_refresh_token
-        approved_user.refresh_token_expiry = datetime.now(timezone.utc) + timedelta(
-            days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-        )
-        approved_user.save()
 
-        # Set the JWT token as a cookie
+        #Set the JWT token as a cookie
         response.set_cookie(
             key="access_token",
             value=f"Bearer { access_token }",
-            httponly=True,  # Ensure the cookie is not accessible via JavaScript
+            httponly=True,
+            samesite="Lax",
+            secure=False,
         )
+
+        # response.set_cookie(
+        #     key="refresh_token",
+        #     value=refresh_token,
+        #     httponly=True,
+        #     samesite="Lax",
+        #     secure=False,
+        # )
 
         return {
             "access_token": access_token,
@@ -138,65 +142,102 @@ async def login_user(
         )
 
 
-@router.post("/logout")
-async def logout_user(response: Response):
-    # Invalidate the JWT token by setting the cookie's expiration to the past
-    response.set_cookie(
-        key="access_token",
-        value="",
-        expires=0,  # Set expiration to 0 to delete the cookie
-        httponly=True,  # Ensure the cookie is not accessible via JavaScript
-    )
+
+
+@router.post(
+    "/logout",
+    summary="Log out user",
+    description="This endpoint allows the user to log out by invalidating the JWT tokens.",
+    response_description="A message indicating the user has been successfully logged out",
+    responses={
+        200: {
+            "description": "Successfully logged out",
+            "content": {
+                "application/json": {"example": {"message": "Successfully logged out"}}
+            },
+        }
+    },
+)
+def logout_user(response: Response):
+    """
+    Invalidate the JWT token by setting the cookie's expiration to the past
+    """
+    response.delete_cookie(key="access_token")
+    response.delete_cookie(key="refresh_token")
 
     return {"message": "Successfully logged out"}
 
 
-@router.post("/refresh")
-async def refresh_token(user_id: str, refresh_token: str):
-    # Find the user by user ID
-    user = Users.objects(user_id=user_id).first()
-    if not user:
+from src.auth.oauth import verify_refresh_token
+
+
+@router.post(
+    "/refresh",
+    status_code=status.HTTP_200_OK,
+    summary="Refresh Access Token",
+    description="This endpoint allows the user to refresh their access token using a valid refresh token stored in cookies.",
+    response_description="A new access token",
+    responses={
+        200: {
+            "description": "Successfully generated a new access token",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "access_token": "newly_generated_access_token"
+                    }
+                }
+            }
+        },
+        403: {
+            "description": "No refresh token provided",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "No refresh token provided"
+                    }
+                }
+            }
+        }
+    }
+)
+def refresh_token(request: Request, response: Response):
+    """
+    Refresh the access token using a valid refresh token.
+    """
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+            status_code=status.HTTP_403_FORBIDDEN, detail="No refresh token provided"
         )
 
-    # Verify the provided refresh token against the stored hash
-    if not bcrypt.checkpw(
-        refresh_token.encode("utf-8"), user.refresh_token.encode("utf-8")
-    ):
+    payload = verify_refresh_token(refresh_token)
 
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Invalid refresh token"
-        )
+    # Get user_id and role from payload
+    user_id = payload.get("sub")
+    user_role = payload.get("role")
 
-    if user.refresh_token_expiry < datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Expired refresh token"
-        )
-
-    # Create a new access token
+    # Create new access token
     access_token = create_access_token(
-        {"sub": user.user_id, "role": user.user_type},
+        {"sub": user_id, "role": user_role},
         settings.ACCESS_TOKEN_EXPIRES_MINUTES,
     )
 
-    # Optionally, create a new refresh token and update the database
-    new_refresh_token = create_refresh_token(data={"sub": user.user_id})
-    user.refresh_token_hash = hash_refresh_token(new_refresh_token)
-    user.refresh_token_expires = datetime.now(timezone.utc) + timedelta(
-        minutes=settings.ACCESS_TOKEN_EXPIRES_MINUTES
+    response.set_cookie(
+        key="access_token",
+        value=f"Bearer { access_token }",
+        httponly=True,
+        samesite="Lax",
+        secure=False,
     )
-    user.save()
 
-    return {
-        "access_token": access_token,
-        "refresh_token": new_refresh_token,
-        "token_type": "bearer",
-    }
+    return {"access_token": access_token}
 
 
-@router.post("/forgot-password")
-def recover_password(email: str, background_task: BackgroundTasks):
+@router.post("/forgot-password/", status_code=status.HTTP_200_OK)
+def recover_password(
+    background_task: BackgroundTasks, payload: users.forgotPassword = Query(...)
+):
+    email = payload.email
     user = find_approved_user(email)
     if not user:
         raise HTTPException(
@@ -209,8 +250,10 @@ def recover_password(email: str, background_task: BackgroundTasks):
     return {"message": "Password reset link has been sent to your email"}
 
 
-@router.post("/reset-password")
-def reset_password(token: str, new_password: str):
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(payload: users.ResetPassword):
+    token = payload.token
+    new_password = payload.new_password
     email = verify_reset_token(token)
     if email == "expired":
         raise HTTPException(
@@ -223,10 +266,6 @@ def reset_password(token: str, new_password: str):
         )
 
     user = find_approved_user(email)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
-        )
 
     hashed_password = hash_password(new_password)
     user.password = hashed_password

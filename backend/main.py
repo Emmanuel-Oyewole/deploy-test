@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from src.core.config import settings
 from src.routers import auth, admin
-from src.helper.utility import create_admin_user
+from src.helper.utility import create_test_users
 from mongoengine import connect
 
 
@@ -13,7 +13,7 @@ async def lifespan(app: FastAPI):
     connect(db=settings.DATABASE_NAME, host=settings.MONGODB_URI)
 
     # Create admin user during startup
-    create_admin_user()
+    #create_test_users()
 
     yield  # Application runs here
 
@@ -34,7 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+@app.get("/health")
 def ping():
     return {"Ping": "Pong"}
 

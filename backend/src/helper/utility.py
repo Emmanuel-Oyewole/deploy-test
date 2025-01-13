@@ -3,7 +3,6 @@ import secrets
 import string
 from src.models.user import Users
 from ..core.config import settings
-import bcrypt
 from itsdangerous import URLSafeTimedSerializer
 
 serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
@@ -28,13 +27,7 @@ def verify_reset_token(token: str) -> str:
         return "invalid"
 
 
-def hash_refresh_token(token: str) -> str:
-    # Hash the refresh token
-    hashed = bcrypt.hashpw(token.encode("utf-8"), bcrypt.gensalt())
-    return hashed.decode("utf-8")
-
-
-def find_approved_user(email: str):
+def find_approved_user(email):
     user = Users.objects(email=email, approved=True).first()
     if user:
         return user
@@ -72,30 +65,52 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def verify_password(password: str, hashed_password: str):
-    return pwd_context.verify(password, hashed_password)
-
-
-# Utility function for admin creation
-from src.models.user import Users
-
-
-def create_admin_user():
-    admin_email = settings.ADMIN_EMAIL
-    admin_password = settings.ADMIN_PASSWORD
-    admin_fullname = settings.ADMIN_FULLNAME
-
-    existing_admin = Users.objects(email=admin_email).first()
-    if not existing_admin:
-        hashed_password = pwd_context.hash(admin_password)
-        admin_user = Users(
-            email=admin_email,
+def create_user_if_not_exists(email, password, fullname, user_type):
+    existing_user = Users.objects(email=email).first()
+    if not existing_user:
+        hashed_password = pwd_context.hash(password)
+        user = Users(
+            email=email,
             password=hashed_password,
-            user_type="Admin",
+            user_type=user_type,
             approved=True,
-            fullname=admin_fullname,
+            fullname=fullname,
         )
-        admin_user.save()
-        print(f"Admin user created with email: {admin_email}")
+        user.save()
+        print(f"{user_type} user created with email: {email}")
     else:
-        print("Admin user already exists.")
+        print(f"{user_type} user already exists with email: {email}")
+
+
+def create_test_users():
+    pwd = settings.GENERAL_PASSWORD
+    create_user_if_not_exists(
+        email=settings.ADMIN_EMAIL,
+        password=pwd,
+        fullname=settings.ADMIN_FULLNAME,
+        user_type="Admin",
+    )
+
+    create_user_if_not_exists(
+        email=settings.STUDENT_EMAIL,
+        password=pwd,
+        fullname=settings.STUDENT_FULLNAME,
+        user_type="Student",
+    )
+
+    create_user_if_not_exists(
+        email=settings.TEACHER_EMAIL,
+        password=pwd,
+        fullname=settings.TEACHER_FULLNAME,
+        user_type="Teacher",
+    )
+
+    create_user_if_not_exists(
+        email=settings.PARENT_EMAIL,
+        password=pwd,
+        fullname=settings.PARENT_FULLNAME,
+        user_type="Parent",
+    )
+
+
+

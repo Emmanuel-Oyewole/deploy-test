@@ -1,7 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List, Literal
 from datetime import datetime
-from bson import ObjectId
+
 
 class UserBase(BaseModel):
     fullname: str = Field(..., min_length=2, max_length= 60)
@@ -35,3 +35,11 @@ class GetUsers(UserBase):
 class EnrollResponse(BaseModel):
     user_id: str
     message: str
+
+
+class forgotPassword(BaseModel):
+    email: EmailStr
+
+class ResetPassword(BaseModel):
+    new_password: str
+    token: str
